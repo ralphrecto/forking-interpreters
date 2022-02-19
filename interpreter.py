@@ -2,7 +2,6 @@ from multiprocessing import Process, Pipe
 import signal
 import os
 import sys
-import psutil
 from typing import Optional
 from dataclasses import dataclass
 from enum import Enum
