@@ -6,43 +6,12 @@ import psutil
 from typing import Optional
 from dataclasses import dataclass
 from enum import Enum
+from abc import ABC
+import driver_message
+import kernel_message
 
 def signal_handler(signal_number, frame):
     pass
-
-def spawn_new_kernel(driver_pid: int, driver_pipe: Pipe):
-    kernel = Kernel(driver_pid, driver_pipe)
-    kernel.run()
-
-def init_kernel() -> KernelClient:
-    driver_pid = os.getpid()
-    parent_pipe, child_pipe = Pipe()
-    kernel_proc = Process(target=spawn_new_kernel, args=(driver_pid, child_pipe))
-
-    return KernelClient(kernel_proc.pid, parent_pipe)
-
-class KernelMessageType(Enum):
-    # Execute a new cell of input.
-    CELL_INPUT = 1
-    # Checkpoint the kernel.
-    CHECKPOINT = 2
-    # Shutdown the Kernel receiving this message.
-    SHUTDOWN = 3
-
-@dataclass
-class KernelMessage:
-    """Messages from the Driver to the Kernel."""
-    msg_type: KernelMessageType
-    msg: Optional[str]
-
-class DriverMessageType:
-    # Output from executing an input cell.
-    CELL_OUTPUT = 1
-
-class DriverMessage:
-    """Messages from the Kernel to the Driver."""
-    msg_type: DriverMessageType
-    msg: Optional[str]
 
 class KernelClient:
 
@@ -54,6 +23,7 @@ class KernelClient:
 class Kernel:
 
     def __init__(self, driver_pid: int, driver_pipe: Pipe):
+        self.pid = os.getpid()
         self.driver_pid = driver_pid
         self.driver_pipe = driver_pipe
 
@@ -67,19 +37,23 @@ class Kernel:
     def run():
         while True:
             msg: KernelMessage = self.driver_pipe.recv()
-            if msg.msg_type == KernelMessageType.CELL_INPUT:
-                # TODO
-                pass
-            elif msg.msg_type == KernelMessageType.CHECKPOINT:
-                # TODO
-                pass
-            elif msg.msg_type == KernelMessageType.SHUTDOWN:
-                # TODO
-                pass
+            if isinstanceof(msg, kernel_message.CellInput):
+                self.next(msg.msg)
+            elif isinstanceof(msg, kernel_message.Checkpoint):
+                checkpoint_pid = self.checkpoint()
+                if checkpoint_pid is None:
+                    raise Error("Fatal error: could not get pid for checkpointed process")
+
+                self.driver_pipe.send(
+                    driver_message.CheckpointCreated(checkpoint_pid)
+                )
+            elif isinstanceof(msg, kernel_message.Shutdown):
+                print(f"Kernel at pid {self.pid} shutting down.")
+                sys.exit(0)
             else:
                 raise ValueError(f"Fatal error: uknown KernelMessageType {msg.msg_type}")
 
-    def checkpoint(self):
+    def checkpoint(self) -> Optional[int]:
         current_pid = os.getpid()
         pid = os.fork()
         if pid == 0:
@@ -125,18 +99,30 @@ class Driver:
 
         # Listen for user input
 
+def spawn_new_kernel(driver_pid: int, driver_pipe: Pipe):
+    kernel = Kernel(driver_pid, driver_pipe)
+    kernel.run()
+
+def init_kernel() -> KernelClient:
+    driver_pid = os.getpid()
+    parent_pipe, child_pipe = Pipe()
+    kernel_proc = Process(target=spawn_new_kernel, args=(driver_pid, child_pipe))
+
+    return KernelClient(kernel_proc.pid, parent_pipe)
+
 def main():
-    kernel = Kernel()
+    pass
+    #kernel = Kernel()
 
-    kernel.next("x = 1")
-    kernel.next("print(x)")
-    kernel.next("x += 1")
-    kernel.next("print(x)")
+    # kernel.next("x = 1")
+    # kernel.next("print(x)")
+    # kernel.next("x += 1")
+    # kernel.next("print(x)")
 
-    kernel.undo()
-    kernel.undo()
+    # kernel.undo()
+    # kernel.undo()
 
-    kernel.next("print(x)")
+    # kernel.next("print(x)")
 
 if __name__ == "__main__":
     main()
