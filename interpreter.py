@@ -9,6 +9,7 @@ from enum import Enum
 from abc import ABC
 import driver_message
 import kernel_message
+import logging
 
 def signal_handler(*args):
     pass
@@ -48,14 +49,13 @@ class Kernel:
             elif isinstance(msg, kernel_message.Checkpoint):
                 checkpoint_pid = self.checkpoint()
                 if checkpoint_pid is None:
-                    self.driver_pipe.send(driver_message.CheckpointRestored())
                     continue
 
                 self.driver_pipe.send(
                     driver_message.CheckpointCreated(checkpoint_pid)
                 )
             elif isinstance(msg, kernel_message.Shutdown):
-                # print(f"Kernel at pid {self.pid} shutting down.")
+                logging.debug(f"Kernel at pid {self.pid} shutting down.")
                 self.driver_pipe.send(driver_message.ShutdownAck())
                 sys.exit(0)
             else:
@@ -65,41 +65,27 @@ class Kernel:
         current_pid = os.getpid()
         pid = os.fork()
         if pid == 0:
-            # child logic
-
+            # This proc is the child.
             # The child process sleeps until it is restored.
             signal.signal(signal.SIGCONT, signal_handler)
             signal.pause()
 
             self.pid = os.getpid()
 
-            # print(f"Kernel with pid {self.pid} is restored")
-
-            # TODO implement logic for checkpoint restoration
+            logging.debug(f"Kernel with pid {self.pid} is restored")
+            self.driver_pipe.send(driver_message.CheckpointRestored())
         else:
             # This proc is the parent.
-            # We return the child pid
+            # We return the child pid.
             return pid
-
-    def restore_checkpoint(self, checkpoint_pid):
-        checkpoint_proc = psutil.Process(checkpoint_pid)
-        checkpoint_proc.resume()
-        sys.exit(0)
 
     def next(self, cell: str):
         self.back.append(cell)
 
-        # TODO double check these exec() params
         # TODO we need to route the Kernel proc's stdout/stderr *back*
         # to the Driver proc, or at least stdout/stderr generated
         # by this exec.
         exec(cell, self.global_env, self.local_env)
-
-    def undo(self):
-        checkpoint_pid = self.checkpoint_pids.pop()
-        self.restore_checkpoint(checkpoint_pid)
-
-        self.back.pop()
 
 def spawn_new_kernel(driver_pid: int, driver_pipe: Pipe):
     kernel = Kernel(driver_pid, driver_pipe)
@@ -123,6 +109,7 @@ class Driver:
         self.checkpoint_pids.append(retmsg.checkpoint_pid)
 
         self.kernel_client.send_message(kernel_message.CellInput(cell))
+        # TODO implement checkpoint pruning
 
     def shutdown(self):
         for checkpoint_pid in self.checkpoint_pids:
