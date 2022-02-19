@@ -1,18 +1,30 @@
 from dataclasses import dataclass
-from abc import ABC
+from abc import ABC, abstractmethod
 
 class KernelMessage(ABC):
     """Messages from the Driver to the Kernel."""
-    pass
 
+    @property
+    @abstractmethod
+    def has_response(self) -> bool:
+        raise NotImplementedError
+
+@dataclass
 class CellInput(KernelMessage):
     """Execute a new cell of input."""
-    pass
+    cell: str
+
+    def has_response(self):
+        return False
 
 class Checkpoint(KernelMessage):
     """Checkpoint the kernel."""
-    pass
+
+    def has_response(self):
+        return True
 
 class Shutdown(KernelMessage):
     """Shutdown the Kernel receiving this message."""
-    pass
+
+    def has_response(self):
+        return False

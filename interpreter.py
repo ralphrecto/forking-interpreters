@@ -14,13 +14,21 @@ def signal_handler(signal_number, frame):
     pass
 
 class KernelClient:
+    """Client to interact with a Kernel process."""
 
     def __init__(self, kernel_pid: int, kernel_pipe: Pipe):
+        # Pid of the Kernel
         self.kernel_pid = kernel_pid
-        # Pipe to send messages to the Kernel process this Client is for
+        # Pipe to communicate with the Kernel
         self.kernel_pipe = kernel_pipe
 
+    def send_message(self, msg: kernel_message.KernelMessage) -> Optional[driver_message.DriverMessage]:
+        self.kernel_pipe.send(msg)
+        if msg.has_response():
+            return self.kernel_pipe.recv()
+
 class Kernel:
+    """Kernel that executes Python programs."""
 
     def __init__(self, driver_pid: int, driver_pipe: Pipe):
         self.pid = os.getpid()
@@ -32,14 +40,12 @@ class Kernel:
 
         self.back = []
 
-        self.checkpoint_pids = []
-
-    def run():
+    def run(self):
         while True:
-            msg: KernelMessage = self.driver_pipe.recv()
-            if isinstanceof(msg, kernel_message.CellInput):
-                self.next(msg.msg)
-            elif isinstanceof(msg, kernel_message.Checkpoint):
+            msg: kernel_message.KernelMessage = self.driver_pipe.recv()
+            if isinstance(msg, kernel_message.CellInput):
+                self.next(msg.cell)
+            elif isinstance(msg, kernel_message.Checkpoint):
                 checkpoint_pid = self.checkpoint()
                 if checkpoint_pid is None:
                     raise Error("Fatal error: could not get pid for checkpointed process")
@@ -47,11 +53,11 @@ class Kernel:
                 self.driver_pipe.send(
                     driver_message.CheckpointCreated(checkpoint_pid)
                 )
-            elif isinstanceof(msg, kernel_message.Shutdown):
+            elif isinstance(msg, kernel_message.Shutdown):
                 print(f"Kernel at pid {self.pid} shutting down.")
                 sys.exit(0)
             else:
-                raise ValueError(f"Fatal error: uknown KernelMessageType {msg.msg_type}")
+                raise ValueError(f"Fatal error: uknown KernelMessage {msg.__class__}")
 
     def checkpoint(self) -> Optional[int]:
         current_pid = os.getpid()
@@ -61,15 +67,15 @@ class Kernel:
 
             parent_proc = psutil.Process(current_pid)
 
+            # The child process sleeps until it is restored.
             signal.signal(signal.SIGCONT, signal_handler)
             signal.pause()
 
-            # Terminate parent.
-            # parent_proc.terminate()
+            # TODO implement logic for checkpoint restoration
         else:
-            # parent logic
-
-            self.checkpoint_pids.append(pid)
+            # This proc is the parent.
+            # We return the child pid
+            return pid
 
     def restore_checkpoint(self, checkpoint_pid):
         checkpoint_proc = psutil.Process(checkpoint_pid)
@@ -91,38 +97,46 @@ class Kernel:
 
         self.back.pop()
 
-class Driver:
-
-    def __init__(self):
-        # Start up kernel child process
-        kernel = Kernel()
-
-        # Listen for user input
-
 def spawn_new_kernel(driver_pid: int, driver_pipe: Pipe):
     kernel = Kernel(driver_pid, driver_pipe)
     kernel.run()
 
-def init_kernel() -> KernelClient:
-    driver_pid = os.getpid()
-    parent_pipe, child_pipe = Pipe()
-    kernel_proc = Process(target=spawn_new_kernel, args=(driver_pid, child_pipe))
+class Driver:
 
-    return KernelClient(kernel_proc.pid, parent_pipe)
+    def __init__(self):
+        self.pid = os.getpid()
+        self.checkpoint_pids = []
+
+        # Start up kernel child process
+        parent_pipe, child_pipe = Pipe()
+        kernel_proc = Process(target=spawn_new_kernel, args=(self.pid, child_pipe))
+        kernel_proc.start()
+
+        self.kernel_client = KernelClient(kernel_proc.pid, parent_pipe)
+
+    def exec_cell(self, cell: str) -> None:
+        retmsg = self.kernel_client.send_message(kernel_message.Checkpoint())
+        self.checkpoint_pids.append(retmsg.checkpoint_pid)
+
+        self.kernel_client.send_message(kernel_message.CellInput(cell))
+
+    def shutdown(self):
+        for checkpoint_pid in self.checkpoint_pids:
+            # TODO is there a better way to do this?
+            os.kill(checkpoint_pid, signal.SIGKILL)
+
+        self.kernel_client.send_message(kernel_message.Shutdown())
 
 def main():
-    pass
-    #kernel = Kernel()
 
-    # kernel.next("x = 1")
-    # kernel.next("print(x)")
-    # kernel.next("x += 1")
-    # kernel.next("print(x)")
+    driver = Driver()
 
-    # kernel.undo()
-    # kernel.undo()
+    driver.exec_cell("x = 1")
+    driver.exec_cell("print(x)")
+    driver.exec_cell("x += 1")
+    driver.exec_cell("print(x)")
 
-    # kernel.next("print(x)")
+    driver.shutdown()
 
 if __name__ == "__main__":
     main()
