@@ -27,4 +27,4 @@ class Shutdown(KernelMessage):
     """Shutdown the Kernel receiving this message."""
 
     def has_response(self):
-        return False
+        return True

@@ -10,7 +10,7 @@ from abc import ABC
 import driver_message
 import kernel_message
 
-def signal_handler(signal_number, frame):
+def signal_handler(*args):
     pass
 
 class KernelClient:
@@ -48,13 +48,15 @@ class Kernel:
             elif isinstance(msg, kernel_message.Checkpoint):
                 checkpoint_pid = self.checkpoint()
                 if checkpoint_pid is None:
-                    raise Error("Fatal error: could not get pid for checkpointed process")
+                    self.driver_pipe.send(driver_message.CheckpointRestored())
+                    continue
 
                 self.driver_pipe.send(
                     driver_message.CheckpointCreated(checkpoint_pid)
                 )
             elif isinstance(msg, kernel_message.Shutdown):
-                print(f"Kernel at pid {self.pid} shutting down.")
+                # print(f"Kernel at pid {self.pid} shutting down.")
+                self.driver_pipe.send(driver_message.ShutdownAck())
                 sys.exit(0)
             else:
                 raise ValueError(f"Fatal error: uknown KernelMessage {msg.__class__}")
@@ -65,11 +67,13 @@ class Kernel:
         if pid == 0:
             # child logic
 
-            parent_proc = psutil.Process(current_pid)
-
             # The child process sleeps until it is restored.
             signal.signal(signal.SIGCONT, signal_handler)
             signal.pause()
+
+            self.pid = os.getpid()
+
+            # print(f"Kernel with pid {self.pid} is restored")
 
             # TODO implement logic for checkpoint restoration
         else:
@@ -127,6 +131,19 @@ class Driver:
 
         self.kernel_client.send_message(kernel_message.Shutdown())
 
+    def undo(self):
+        if len(self.checkpoint_pids) == 0:
+            raise Error("Nothing to undo.")
+
+        checkpoint_pid = self.checkpoint_pids.pop()
+        ack = self.kernel_client.send_message(kernel_message.Shutdown())
+        self.kernel_client.kernel_pid = checkpoint_pid
+
+        os.kill(checkpoint_pid, signal.SIGCONT)
+        msg = self.kernel_client.kernel_pipe.recv()
+        assert isinstance(msg, driver_message.CheckpointRestored)
+
+
 def main():
 
     driver = Driver()
@@ -134,6 +151,11 @@ def main():
     driver.exec_cell("x = 1")
     driver.exec_cell("print(x)")
     driver.exec_cell("x += 1")
+    driver.exec_cell("print(x)")
+
+    driver.undo()
+    driver.undo()
+
     driver.exec_cell("print(x)")
 
     driver.shutdown()

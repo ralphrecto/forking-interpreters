@@ -10,3 +10,9 @@ class CheckpointCreated(DriverMessage):
 
     # Pid of the newly created checkpoint process.
     checkpoint_pid: int
+
+class CheckpointRestored(DriverMessage):
+    pass
+
+class ShutdownAck(DriverMessage):
+    pass
