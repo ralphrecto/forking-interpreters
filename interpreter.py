@@ -37,7 +37,7 @@ import driver_message
 import kernel_message
 import logging
 
-# Special REPL token that tells makes the interpreter undo the last command.
+# Special REPL token that tells the interpreter to undo the last command.
 _UNDO_REPL_TOKEN = "!!"
 
 class KernelClient:
