@@ -14,5 +14,5 @@ class CheckpointCreated(DriverMessage):
 class CheckpointRestored(DriverMessage):
     pass
 
-class ShutdownAck(DriverMessage):
+class Ack(DriverMessage):
     pass
